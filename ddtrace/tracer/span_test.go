@@ -2,10 +2,14 @@ package tracer
 
 import (
 	"errors"
+	"path"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	pkgerrors "github.com/pkg/errors"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/ext"
 
 	"github.com/stretchr/testify/assert"
@@ -142,6 +146,26 @@ func TestSpanFinishWithErrorStackFrames(t *testing.T) {
 	assert.Contains(span.Meta[ext.ErrorStack], "tracer.TestSpanFinishWithErrorStackFrames")
 	assert.Contains(span.Meta[ext.ErrorStack], "tracer.(*span).Finish")
 	assert.Equal(strings.Count(span.Meta[ext.ErrorStack], "\n\t"), 2)
+}
+
+func TestSpanFinishWithErrorStackTrace(t *testing.T) {
+	assert := assert.New(t)
+
+	err := errors.New("test error with stack being applied later")
+	errWithStack := pkgerrors.WithStack(err)
+	_, thisFile, thisLineNumber, _ := runtime.Caller(0)
+	span := newBasicSpan("web.request")
+	span.Finish(WithError(errWithStack), StackFrames(2, 1))
+
+	referenceToWithStackLocation := path.Base(thisFile) + ":" + strconv.Itoa(thisLineNumber-1)
+
+	assert.Equal(int32(1), span.Error)
+	assert.Equal("test error with stack being applied later", span.Meta[ext.ErrorMsg])
+	assert.Equal("*errors.withStack", span.Meta[ext.ErrorType])
+	assert.Contains(span.Meta[ext.ErrorStack], "tracer.TestSpanFinishWithErrorStackTrace")
+	assert.Contains(span.Meta[ext.ErrorStack], referenceToWithStackLocation)
+	assert.NotContains(span.Meta[ext.ErrorStack], "tracer.(*span).Finish")
+	assert.Equal(3, strings.Count(span.Meta[ext.ErrorStack], "\n\t"))
 }
 
 func TestSpanSetTag(t *testing.T) {

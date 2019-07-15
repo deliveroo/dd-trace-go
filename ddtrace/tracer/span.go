@@ -114,6 +114,13 @@ func (s *span) SetTag(key string, value interface{}) {
 	s.Meta[key] = fmt.Sprint(value)
 }
 
+// stackTracer structs implement methods capable of defining a specific StackTrace that should be used.
+// github.com/pkg/errors conforms to it.
+type stackTracer interface {
+	Error() string
+	StackTrace() []interface{}
+}
+
 // setTagError sets the error tag. It accounts for various valid scenarios.
 // This method is not safe for concurrent use.
 func (s *span) setTagError(value interface{}, cfg *errorConfig) {
@@ -127,6 +134,15 @@ func (s *span) setTagError(value interface{}, cfg *errorConfig) {
 			s.Error = 0
 		} else {
 			s.Error = 1
+		}
+	case stackTracer:
+		// If a StackTrace-able error is given, use the specified stack (to whatever depth specified), instead of the current stack.
+		s.Error = 1
+		s.Meta[ext.ErrorMsg] = v.Error()
+		s.Meta[ext.ErrorType] = reflect.TypeOf(v).String()
+		s.Meta[ext.ErrorDetails] = fmt.Sprintf("%+v", v)
+		if !cfg.noDebugStack {
+			s.Meta[ext.ErrorStack] = stringifyStackTrace(v.StackTrace())
 		}
 	case error:
 		// if anyone sets an error value as the tag, be nice here
@@ -156,6 +172,16 @@ func (s *span) setTagError(value interface{}, cfg *errorConfig) {
 		// is the result of an error.
 		s.Error = 1
 	}
+}
+
+// stringifyStackTrace turns a standardised errors.StackTrace into a string equivalent to runtime.Stack().
+func stringifyStackTrace(stack []interface{}) string {
+	var builder strings.Builder
+	for _, frame := range stack {
+		builder.WriteString(fmt.Sprintf("%+v\n", frame))
+	}
+
+	return builder.String()
 }
 
 // takeStacktrace takes stacktrace
